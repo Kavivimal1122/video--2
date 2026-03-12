@@ -6,7 +6,7 @@ from PIL import Image, ImageOps, ImageFilter
 import io
 import os
 
-# --- TESSERACT ENGINE SETUP (For Streamlit Cloud) ---
+# --- TESSERACT ENGINE SETUP ---
 if os.path.exists('/usr/bin/tesseract'):
     pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 
@@ -22,72 +22,72 @@ def get_91club_data(num):
     size = "B" if num >= 5 else "S"
     return color, size
 
-st.set_page_config(page_title="91 Club Screenshot Scanner", layout="wide")
-st.title("📸 91 Club: High-Accuracy Screenshot Scanner")
-st.write("Upload one or more screenshots of the game history for a perfect Excel report.")
+st.set_page_config(page_title="91 Club Row Scanner", layout="wide")
+st.title("📸 91 Club: Full Table Scanner")
+st.write("This version reads row-by-row to ensure all 10+ results are captured.")
 
-# Allow multiple file uploads
-uploaded_files = st.file_uploader("Upload Screenshots (PNG/JPG)", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True)
+uploaded_files = st.file_uploader("Upload Screenshot", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True)
 
 if uploaded_files:
-    final_results = {} # Use dictionary to keep Period Numbers unique
+    final_results = {} 
     
-    if st.button("🔍 Scan Screenshots"):
-        with st.spinner("Analyzing images..."):
+    if st.button("🔍 Extract All Rows"):
+        with st.spinner("Processing table..."):
             for uploaded_file in uploaded_files:
-                # Load image
                 img = Image.open(uploaded_file)
                 
-                # --- STEP 1: IMAGE ENHANCEMENT ---
-                # Convert to Grayscale
-                img = img.convert('L')
-                # Increase Contrast and Sharpen (makes numbers pop)
+                # Image Pre-processing for better table reading
+                img = img.convert('L') # Grayscale
+                img = ImageOps.invert(img) # Invert helps OCR read white text on dark buttons
                 img = ImageOps.autocontrast(img)
-                img = img.filter(ImageFilter.SHARPEN)
                 
-                # --- STEP 2: OCR EXTRACTION ---
-                # PSM 6 is best for table-like structures
-                text = pytesseract.image_to_string(img, config='--psm 6 digits')
+                # Use PSM 6 (Assume a uniform block of text)
+                text = pytesseract.image_to_string(img, config='--psm 6')
                 
-                # Regex: Look for 15-digit Period Numbers and 1-digit Results
-                periods = re.findall(r'\d{13,15}', text)
-                numbers = re.findall(r'\b\d{1}\b', text)
+                # Split text into lines to process row by row
+                lines = text.split('\n')
                 
-                for i in range(min(len(periods), len(numbers))):
-                    p_num = str(periods[i])
-                    r_num = int(numbers[i])
+                for line in lines:
+                    # Look for Period Number (usually starts with 2026...)
+                    period_match = re.search(r'(20\d{11,13})', line)
                     
-                    # Ensure the period looks real (usually starts with 202)
-                    if p_num.startswith("20"):
-                        color, size = get_91club_data(r_num)
+                    if period_match:
+                        p_num = period_match.group(1)
                         
-                        # Save to dict to prevent duplicates across multiple screenshots
-                        if p_num not in final_results:
-                            final_results[p_num] = {
-                                "Period Number": p_num,
-                                "Result Number": r_num,
-                                "Color": color,
-                                "Size": size
-                            }
+                        # After finding the period, look for the single result digit in the same line
+                        # We look for a 1-digit number that is NOT part of the period
+                        remaining_text = line.replace(p_num, "")
+                        result_match = re.search(r'\b(\d{1})\b', remaining_text)
+                        
+                        if result_match:
+                            r_num = int(result_match.group(1))
+                            color, size = get_91club_data(r_num)
+                            
+                            if p_num not in final_results:
+                                final_results[p_num] = {
+                                    "Period Number": p_num,
+                                    "Result Number": r_num,
+                                    "Color": color,
+                                    "Size": size
+                                }
 
         if final_results:
             df = pd.DataFrame(list(final_results.values()))
-            # Sort Newest to Oldest
             df = df.sort_values(by='Period Number', ascending=False)
             
-            st.success(f"✅ Found {len(df)} Unique Clean Results!")
+            st.success(f"✅ Successfully extracted {len(df)} results!")
             st.dataframe(df, use_container_width=True)
             
-            # --- DOWNLOAD ---
+            # Excel Download
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df.to_excel(writer, index=False)
             
             st.download_button(
-                label="📥 Download Clean Excel Sheet",
+                label="📥 Download Results as Excel",
                 data=output.getvalue(),
-                file_name="91Club_Screenshot_Results.xlsx",
+                file_name="91Club_Full_Scan.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.error("No results found. Please ensure the screenshot is clear.")
+            st.error("No rows detected. Try a clearer screenshot.")
