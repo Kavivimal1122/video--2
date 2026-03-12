@@ -10,7 +10,6 @@ import os
 if os.path.exists('/usr/bin/tesseract'):
     pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 
-# --- 91 CLUB MAPPING LOGIC ---
 def get_color_code(num):
     if num in [1, 3, 7, 9]: return "G"
     if num in [2, 4, 6, 8]: return "R"
@@ -21,9 +20,8 @@ def get_color_code(num):
 def get_size_code(num):
     return "B" if num >= 5 else "S"
 
-st.set_page_config(page_title="91 Club Ultimate Scanner", layout="wide")
-st.title("🎰 91 Club: Video to Excel (Strict Mode)")
-st.write("Scan fast recordings and get clean, unique results.")
+st.set_page_config(page_title="91 Club Live Scanner", layout="wide")
+st.title("🚀 91 Club: High-Speed Live Scanner")
 
 uploaded_video = st.file_uploader("Upload Game Video", type=['mp4', 'mov'])
 
@@ -32,12 +30,16 @@ if uploaded_video:
     tfile.write(uploaded_video.read())
 
     if st.button("🔥 START DEEP SCAN"):
-        cap = cv2.VideoCapture(tfile.name)
-        # Dictionary locks the Period Number so only the FIRST discovery is saved
-        final_results = {} 
-        
+        # --- UI ELEMENTS FOR ANIMATION ---
+        status_message = st.empty()
         progress_bar = st.progress(0)
+        counter_display = st.empty()
+        
+        cap = cv2.VideoCapture(tfile.name)
+        final_results = {} 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        status_message.info("⚙️ AI is starting... Please do not close this tab.")
         
         frame_idx = 0
         while cap.isOpened():
@@ -45,14 +47,18 @@ if uploaded_video:
             if not ret: break
             
             frame_idx += 1
-            if frame_idx % 5 == 0:
+            
+            # Every 10 frames, update the UI so the user sees progress
+            if frame_idx % 10 == 0:
                 progress_bar.progress(min(frame_idx / total_frames, 1.0))
+                counter_display.metric("Total Results Found", len(final_results))
+                status_message.warning(f"Scanning Frame {frame_idx} of {total_frames}...")
 
-            # Image Preprocessing (Grayscale + Threshold)
+            # Process Image
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
             
-            # OCR Scan
+            # Deep OCR Scan
             text = pytesseract.image_to_string(thresh, config='--psm 6 digits')
             
             periods = re.findall(r'\d{12,15}', text)
@@ -62,7 +68,6 @@ if uploaded_video:
                 p_num = str(periods[i])
                 r_num = int(numbers[i])
                 
-                # STRICT RULE: Only save if Period Number is new
                 if p_num not in final_results:
                     final_results[p_num] = {
                         "Period Number": p_num,
@@ -74,15 +79,13 @@ if uploaded_video:
         cap.release()
 
         if final_results:
+            status_message.success(f"✅ Scanning Complete! {len(final_results)} results found.")
             df = pd.DataFrame(list(final_results.values()))
-            # Sort Newest to Oldest
             df = df.sort_values(by='Period Number', ascending=False)
             
-            st.success(f"✅ Found {len(df)} Unique Clean Results!")
-            st.dataframe(df)
+            st.dataframe(df, use_container_width=True)
             
-            # Download Button
             csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Download win_go_results.xlsx", csv, "win_go_results.csv", "text/csv")
+            st.download_button("📥 Download All Results", csv, "win_go_results.csv", "text/csv")
         else:
-            st.error("No results found. Is the video clear?")
+            status_message.error("❌ No results found. Check video clarity.")
